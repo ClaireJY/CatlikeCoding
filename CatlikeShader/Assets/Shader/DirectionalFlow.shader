@@ -6,12 +6,15 @@ Shader "Custom/DirectionalFlow"
 		[NoScaleOffset] _MainTex ("Deriv (AG) Height (B)", 2D) = "black" {}
 		[NoScaleOffset] _FlowMap ("Flow (RG)", 2D) = "black" {}
 		_Tiling ("Tiling", Float) = 1
+		_TilingModulated ("Tiling, Modulated", Float) = 1
+		_GridResolution("Grid Resolution", Float) = 10
 		_Speed ("Speed", Float) = 1
 		_FlowStrength ("Flow Strength", Float) = 1
 		_HeightScale ("Height Scale, Constant", Float) = 0.25
 		_HeightScaleModulated ("Height Scale, Modulated", Float) = 0.75
 		_Glossiness ("Smoothness", Range(0,1)) = 0.5
 		_Metallic ("Metallic", Range(0,1)) = 0.0
+		
     }
     SubShader
     {
@@ -25,7 +28,7 @@ Shader "Custom/DirectionalFlow"
 		#include "Flow.cginc"
 
 		sampler2D _MainTex, _FlowMap;
-		float _Tiling, _Speed, _FlowStrength;
+		float _Tiling, _TilingModulated, _GridResolution,_Speed, _FlowStrength;
 		float _HeightScale, _HeightScaleModulated;
 
 		struct Input {
@@ -42,13 +45,64 @@ Shader "Custom/DirectionalFlow"
 			return dh;
 		}
 
+		float3 FlowCell(float2 uv, float2 offset, float time, bool gridB)
+		{
+			offset *= 0.5;
+			float2x2 deriveRotation;
+
+			float2 shift = 1-offset;
+			shift *= 0.5;
+			offset *= 0.5;
+			if(gridB)
+			{
+				offset += 0.25;
+				shift -= 0.25;
+			}
+			float2 uvTiled = (floor(uv * _GridResolution + offset) + shift) / _GridResolution;
+			float3 flow = tex2D(_FlowMap, uvTiled*0.1).rgb;
+			flow.xy = flow.xy * 2 -1 ;
+			flow.z *= flow.z * _HeightScaleModulated + _HeightScale;
+			float tiling = flow.z * _TilingModulated * _Tiling;
+			float2 uvFlow = DirectionalFlowUV(uv + offset, flow, tiling, time, deriveRotation);
+			
+
+			
+			float3 dh = UnpackDerivativeHeight(tex2D(_MainTex, uvFlow));
+			dh.xy = mul(deriveRotation, dh.xy);
+			return dh;
+		}
+
+		float3 FlowGrid(float2 uv, float2 time, bool gridB)
+		{
+			float3 dhA = FlowCell(uv, float2(0,0), time, gridB);
+			float3 dhB = FlowCell(uv, float2(1,0), time, gridB);
+			float3 dhC = FlowCell(uv, float2(0,1), time, gridB);
+			float3 dhD = FlowCell(uv, float2(1,1), time, gridB);
+
+			float2 t = uv * _GridResolution;
+			if(gridB)
+			{
+				t += 0.25;
+			}
+			t = abs(2 * frac(t) - 1);
+			float wA = (1-t.x) * (1-t.y);
+			float wB = t.x * (1-t.y);
+			float wC = (1-t.x) * t.y;
+			float wD = t.x * t.y;
+			float3 dh = dhA * wA + dhB * wB + dhC * wC + dhD * wD;
+			return dh;
+		}
+
 		void surf (Input IN, inout SurfaceOutputStandard o) 
 		{
 			float time = _Time.y * _Speed;
-			float2 uvFlow = DirectionalFlowUV(IN.uv_MainTex, float2(sin(_Time.y),cos(_Time.y)), _Tiling, time);
-			float3 dh = UnpackDerivativeHeight(tex2D(_MainTex, uvFlow));
+			float2 uv = IN.uv_MainTex;
+
+			float3 dh = FlowGrid(uv, time, false);
+			dh = (dh + FlowGrid(uv, time, true)) *0.5;
+
 			fixed4 c = dh.z * dh.z * _Color;
-			o.Albedo = dh;
+			o.Albedo = c.rgb;
 			o.Normal = normalize(float3(-dh.xy, 1));
 			o.Metallic = _Metallic;
 			o.Smoothness = _Glossiness;

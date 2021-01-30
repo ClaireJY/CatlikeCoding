@@ -17,12 +17,11 @@ float3 FlowUVW (
 }
 
 float2 DirectionalFlowUV (
-	float2 uv, float2 flowVector, float tiling, float time, out float2x2 rotation
-) {
-	float2 dir = normalize(flowVector.xy);
-	rotaion = float2x2(dir.y, dir.x, -dir.x, dir.y);
+	float2 uv, float3 dirctionAndSpeed , float tiling, float time, out float2x2 rotation) {
+	float2 dir = normalize(dirctionAndSpeed.xy);
+	rotation = float2x2(dir.y, dir.x, -dir.x, dir.y);
 	uv = mul(float2x2(dir.y, -dir.x, dir.x, dir.y), uv);
-	uv.y -= time;
+	uv.y -= time * dirctionAndSpeed.z;
 	return uv*tiling;
 }
 
